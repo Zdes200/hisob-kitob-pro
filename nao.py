@@ -137,4 +137,4 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handler))
 
 print("Bot ishga tushdi...")
-app.run_polling()
+app.run_polling(drop_pending_updates=True, close_loop=False)
