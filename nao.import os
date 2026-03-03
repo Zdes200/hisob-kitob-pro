@@ -1,0 +1,149 @@
+import os
+import yt_dlp
+from shazamio import Shazam
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
+
+# 🔐 Token Railway environment'dan olinadi
+TOKEN = os.getenv("TOKEN")
+
+# 👑 Admin ID ham environment'dan olish mumkin
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+
+users = set()
+
+# ================= MENU =================
+
+def main_menu():
+    keyboard = [
+        [InlineKeyboardButton("🎥 Video Yuklash", callback_data="download")],
+        [InlineKeyboardButton("🎵 Shazam + Lyrics", callback_data="shazam")],
+        [InlineKeyboardButton("👑 Admin Panel", callback_data="admin")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+# ================= START =================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    users.add(update.effective_user.id)
+    await update.message.reply_text(
+        "🤖 Professional Media Bot\n\nTanlang:",
+        reply_markup=main_menu()
+    )
+
+# ================= BUTTON =================
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "download":
+        await query.message.reply_text("📎 Video link yuboring")
+
+    elif query.data == "shazam":
+        await query.message.reply_text("🎤 Audio yoki voice yuboring")
+
+    elif query.data == "admin":
+        if query.from_user.id == ADMIN_ID:
+            await query.message.reply_text(
+                f"👥 Foydalanuvchilar soni: {len(users)}"
+            )
+        else:
+            await query.message.reply_text("❌ Siz admin emassiz")
+
+# ================= VIDEO =================
+
+async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text
+
+    if "http" not in url:
+        return
+
+    await update.message.reply_text("⏳ Yuklanmoqda...")
+
+    ydl_opts = {
+        'format': 'best[filesize<50M]',
+        'outtmpl': 'video.%(ext)s',
+        'quiet': True
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        for file in os.listdir():
+            if file.startswith("video."):
+                await update.message.reply_video(video=open(file, 'rb'))
+                os.remove(file)
+                break
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Xatolik: {e}")
+
+# ================= SHAZAM =================
+
+async def shazam_music(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    file_path = "audio.ogg"
+
+    if update.message.voice:
+        file = await update.message.voice.get_file()
+        await file.download_to_drive(file_path)
+
+    elif update.message.audio:
+        file = await update.message.audio.get_file()
+        await file.download_to_drive(file_path)
+    else:
+        return
+
+    await update.message.reply_text("🔍 Aniqlanmoqda...")
+
+    shazam = Shazam()
+    result = await shazam.recognize_song(file_path)
+
+    try:
+        track = result["track"]
+        title = track["title"]
+        artist = track["subtitle"]
+
+        text = f"🎵 {artist} - {title}"
+
+        if "sections" in track:
+            for section in track["sections"]:
+                if section["type"] == "LYRICS":
+                    lyrics = "\n".join(section["text"][:15])
+                    text += f"\n\n📝 Lyrics:\n{lyrics}"
+                    break
+
+        await update.message.reply_text(text)
+
+    except:
+        await update.message.reply_text("❌ Qo‘shiq topilmadi.")
+
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+# ================= RUN =================
+
+if not TOKEN:
+    raise ValueError("TOKEN topilmadi! Railway environment variable tekshiring.")
+
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(button_handler))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
+app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, shazam_music))
+
+print("Bot Railway'da ishga tushdi...")
+app.run_polling()	
